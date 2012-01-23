@@ -14,13 +14,13 @@ def g(q, xi):
         y = eigenvalue(q)-xi;
     """
     return flx.eigenvalue(q)-xi
-    
+
 
 def dg(q, xi, eta=1e-7):
     """
     function y = dg(q,xi)
         eta=1e-7;
-        y = (g(q+eta,xi)-g(q-eta,xi))/(2*eta);    
+        y = (g(q+eta,xi)-g(q-eta,xi))/(2*eta);
     """
     return ( g(q + eta, xi) - g(q - eta, xi) ) / ( 2 * eta )
 
@@ -47,6 +47,7 @@ def newton(q0, xi, tol = 1e-12, iMAX = 100):
             break
         dq = g(q, xi) / dg(q, xi)
         q = q-dq
-    if i == iMAX and abs( g(q, xi) ) < tol: print('Not converged using Newton')
+    #if i == iMAX and abs( g(q, xi) ) < tol: print('Not converged using Newton')
     #print('Newton number of iteration to converge: {0:d}'.format(i))
     return q
+

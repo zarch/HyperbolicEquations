@@ -43,6 +43,11 @@ def minmod(a,b):
         slope = a
     elif abs(a) > abs(b):
         slope = b
+    else:
+        print(a)
+        print(b)
+        print('no conditions are sadisfies: a*b<0, abs(a)<=abs(b), abs(a)>abs(b)')
+        raise
     return slope
 
 def get_sol_interfaceMUSCL(sol, dx, dt):
@@ -57,13 +62,13 @@ def get_sol_interfaceMUSCL(sol, dx, dt):
     qm(1)=q(1);
     qp(IMAX)=q(IMAX-1);
     """
-    slope, sol_p, sol_m = [],[],[]
-    for i in range(2, len(sol) - 2):
-        slope = minmod(sol[i] - sol[i-1], sol[i+1] - sol[i])
+    slope, sol_p, sol_m = np.empty(sol.shape), np.empty(sol.shape), np.empty(sol.shape)
+    for i in range(1, len(sol) - 1):
+        slope[i] = minmod(sol[i] - sol[i-1], sol[i+1] - sol[i])
         sol0_p = sol[i] - 0.5 * slope[i]
         sol0_m = sol[i] + 0.5 * slope[i]
-        sol_p.append( sol0_p + 0.5* dt/dx * (flx.flux(sol0_p) - flx.flux(sol0_m) ) )
-        sol_m.append( sol0_m + 0.5* dt/dx * (flx.flux(sol0_p) - flx.flux(sol0_m) ) )
+        sol_p[i] = ( sol0_p + 0.5* dt/dx * (flx.flux(sol0_p) - flx.flux(sol0_m) ) )
+        sol_m[i] = ( sol0_m + 0.5* dt/dx * (flx.flux(sol0_p) - flx.flux(sol0_m) ) )
     # set values at the boundaries
     sol_p[-1] = sol[-1]
     sol_m[ 0] = sol[ 0]
@@ -98,7 +103,15 @@ def get_sol_interface(sol, dx, dt):
 
 
 def checkCFL(solution, dx, courant, time, tEND,):
-    """Check CFL stability and final time matching
+    """Return dt and boolean value
+    Check CFL stability and final time matching
+
+    >>> checkCFL([1,1,1,1,0,0,0,0], 0.5, 1, 1, 3,)
+    0.5, False
+    >>> checkCFL([1,1,1,1,0,0,0,0], 0.5, 1, 2.5, 3,)
+    0.5, False
+    >>> checkCFL([1,1,1,1,0,0,0,0], 0.5, 1, 2.6, 3,)
+    0.5, False
 
     dt = c * dx / max( abs( eigenvalue(q) ) );
     if(time + dt > t1)
@@ -109,14 +122,15 @@ def checkCFL(solution, dx, courant, time, tEND,):
     end"""
     maxflux = np.max( np.abs( flx.eigenvalue(solution) ) )
     dt = courant * dx / maxflux
-    if dt == np.nan: return -9999
+    #if dt == np.nan: return dt, False
     if time + dt > tEND:
-        return tEND - time
+        return tEND - time, False
     if time >= tEND:
-        return -9999
-    strformat = 'time={t:6.5f}; dt={dt:6.5f}; dx={dx:6.5f}; c={c:3.2f}; maxflux={fl:6.5f};'
-    print(strformat.format(t=time, dt=dt, dx=dx, c=courant, fl=maxflux) )
-    return dt
+        return -9999, False
+    #strformat = 'time={t:6.5f}; dt={dt:6.5f}; dx={dx:6.5f}; c={c:3.2f}; maxflux={fl:6.5f};'
+    #print(strformat.format(t=time, dt=dt, dx=dx, c=courant, fl=maxflux) )
+    # return dt and stop
+    return dt, True
 
 
 #===========================================================================
@@ -142,15 +156,17 @@ def burgers1Dexact(xvect, tvect, x0, qL, qR, iMAX):
 from fluxes import NUM_MTD
 
 def fv1D(solution, dx, qL, qR, tSTART, tEND, courant,
-         nummtd, maxiter=10000):
+         nummtd, solintmtd, maxiter=10000): #FIXME: delete solintmtd, required by the second order
     print nummtd
     time = tSTART
-    for _ in range(maxiter):
-        dt = checkCFL(solution, dx, courant, time, tEND,)
-        if dt == -9999: break
+    go_on = True
+    itertime = 0
+    while go_on and itertime<maxiter:
+        dt, go_on = checkCFL(solution, dx, courant, time, tEND,)
+        #if dt == -9999: break
         next_solution = np.empty(solution.shape)
         # UPWIND method #FIXME: perché secondo Lucas questo metodo è upwind non lo posso sapere a priori, o si?
-        for i in range(2, len(solution) - 2):
+        for i in range(1, len(solution) - 1):
 #            fR = godSca(q(i),q(i+1));
 #            fL = godSca(q(i-1),q(i));
             fluxL = NUM_MTD[nummtd](solution[i-1], solution[i], dx, dt)
@@ -162,23 +178,30 @@ def fv1D(solution, dx, qL, qR, tSTART, tEND, courant,
         next_solution[-1] = qR
         solution = next_solution
         time += dt
+        itertime += 1
+        #go_on = False if itertime>maxiter else go_on
         yield time, solution
 
 
+SOLINT_MTD = {'simple' : get_sol_interface,
+              'muscl'  : get_sol_interfaceMUSCL}
+
 
 def fv1DseconOrder(sol, dx, qL, qR, tSTART, tEND, courant,
-                   nummtd, maxiter=10000):
+                   nummtd, solintmtd, maxiter=10000):
     """
 
     """
     print nummtd
     time = tSTART
-    for _ in range(maxiter):
-        dt = checkCFL(sol, dx, courant, time, tEND,)
+    go_on = True
+    itertime = 0
+    while go_on and itertime<maxiter:
+        dt, go_on = checkCFL(sol, dx, courant, time, tEND,)
         if dt == -9999: break
-        sol_p, sol_m = get_sol_interface(sol, dx, dt)
+        sol_p, sol_m = SOLINT_MTD[solintmtd](sol, dx, dt)
         # UPWIND method #FIXME: perché secondo Lucas questo metodo è upwind non lo posso sapere a priori, o si?
-        for i in range(2, len(sol) - 2):
+        for i in range(1, len(sol) - 2):
 #            fR = godSca(q(i),q(i+1));
 #            fL = godSca(q(i-1),q(i));
             fluxL = NUM_MTD[nummtd](sol_m[i-1], sol_p[i], dx, dt)
@@ -189,6 +212,8 @@ def fv1DseconOrder(sol, dx, qL, qR, tSTART, tEND, courant,
         sol[ 0] = qL
         sol[-1] = qR
         time += dt
+        itertime += 1
+        #go_on = False if itertime>maxiter else go_on
         yield time, sol
 
 #
@@ -224,11 +249,13 @@ def get_q_limit(qL, qR, ylimext):
     limiter = qR * ylimext
     return qL - limiter, qR + limiter
 
-
+ORDER = {'first' : fv1D,
+         'second': fv1DseconOrder}
 
 
 def plot_fv1D(xL, xR, x0, iMAX, qL, qR, tSTART, tEND, courant,
-              nummtd, maxiter=10000, pause=0.005,
+              nummtd, order='first', solintmtd='simple',
+              maxiter=10000, pause=0.005,
               ylimext = 0.15):
     # equidistant distribution of iMAX points between xL and xR
     xvect, dx = np.linspace(xL, xR, iMAX, retstep = True)
@@ -246,7 +273,9 @@ def plot_fv1D(xL, xR, x0, iMAX, qL, qR, tSTART, tEND, courant,
     print prettyp(solution[:10])
     line1, = ax.plot(xvect_b, solution, 'o')
     #plt.ylim( ( qL_limit, qR_limit ) )
-    for time, solution in fv1DseconOrder(solution, dx, qL, qR, tSTART, tEND, courant, nummtd, maxiter=10000):
+    for time, solution in ORDER[order](solution, dx, qL, qR, tSTART, tEND,
+                                       courant, nummtd, solintmtd,
+                                       maxiter=10000):
         plt.pause(pause)
         ax.clear()
         #print xvect_b
@@ -261,15 +290,16 @@ def plot_fv1D(xL, xR, x0, iMAX, qL, qR, tSTART, tEND, courant,
 
 
 
-def main():
-    from confPDE import *
-    #plot_burgers1Dexact(xL, xR, iMAX, x0, qL, qR, tEND, tMAX, pause=0.005)
-
-    # nummtd = godSca, lfSca, lwSca, forceSca, roeSca, oshermodSca
-    plot_fv1D(xL, xR, x0, iMAX, qL, qR, tSTART, tEND, courant,
-              'lwSca', maxiter=10000, pause=0.005)
-
-main()
+#def main():
+#    from confPDE import *
+#    #plot_burgers1Dexact(xL, xR, iMAX, x0, qL, qR, tEND, tMAX, pause=0.005)
+#
+#    # nummtd = godSca, lfSca, lwSca, forceSca, roeSca, oshermodSca
+#    plot_fv1D(xL, xR, x0, iMAX, qL, qR, tSTART, tEND, courant,
+#              nummtd, order, solintmtd, maxiter=10000, pause=0.005)
+#
+#
+#main()
 
 #>>> config.sections()
 #[Burgers 1D exact]

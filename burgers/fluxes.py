@@ -5,6 +5,7 @@ Define Flux functions
 @author: pietro
 """
 import numpy as np
+import __future__
 
 def toarray(xvect):
     if isinstance(xvect, np.ndarray):
@@ -33,7 +34,7 @@ def eigenvalue(q):
 from solve import newton
 
 def nlers(qL, qR, xi):
-    """    
+    """
     function q = NLERS(qL,qR,xi)
         aL = eigenvalue(qL);
         aR = eigenvalue(qR);
@@ -79,8 +80,8 @@ def nlers(qL, qR, xi):
             q = 0.5 * (qL + qR)
             q = newton(q, xi)
     return q
-            
-            
+
+
 def shock(xvect, x0, qL, qR):
     """
     >>> shock(range(10), 4, 2, 8)
@@ -91,7 +92,7 @@ def shock(xvect, x0, qL, qR):
     solution[np.nonzero(xvect <= x0)] = qL
     solution[np.nonzero(xvect > x0)] = qR
     return solution
-    
+
 #
 #def rarefaction(xvect, xL, xR, qL, qR):
 #    xvect = toarray(xvect)
@@ -107,7 +108,7 @@ def shock(xvect, x0, qL, qR):
 #    aL = eigenvalue(qL)
 #    aR = eigenvalue(qR)
 #    xvect = toarray(xvect)
-#    
+#
 #    if(aL > aR):
 #        # is a Shock wave
 #        s = ( flux(qR) - flux(qL) ) / ( qR - qL )
@@ -121,46 +122,46 @@ def shock(xvect, x0, qL, qR):
 
 
 def godsca(qL, qR, dx, dt):
-    """Godunov flux, pag 55, formula 4.14  
-    
+    """Godunov flux, pag 55, formula 4.14
+
     function flu = godSca(qL,qR)
         flu = flux(NLERS(qL,qR,0));
     """
     return flux( nlers(qL, qR, 0) ) # FIXME: perché 0? perché calcolo il flusso sul bordo tra due celle
 
-def lfsca(qL, qR, dx, dt): 
+def lfsca(qL, qR, dx, dt):
     """Lax-Friedrichs flux, pag 54, formula 4.8
-    
+
     function flu = lfSca(qL,qR,dx,dt)
         flu = 1/2*(flux(qR)+flux(qL))-1/2*dx/dt*(qR-qL);
     """
     return 0.5 * ( flux(qR) + flux(qL) ) - 0.5 * dx/dt * ( qR - qL )
 
-def lwsca(qL, qR, dx, dt): 
+def lwsca(qL, qR, dx, dt):
     """Lax-Wendrof flux, pag 54, formula 4.9
-    
+
     function flu = lwSca(qL,qR,dx,dt)
         a = 0.5 * ( eigenvalue(qL) + eigenvalue(qR) );
-        flu = 1/2 * ( flux(qR)+flux(qL) ) - 1/2 * dt/dx * a^2 * ( qR - qL );    
+        flu = 1/2 * ( flux(qR)+flux(qL) ) - 1/2 * dt/dx * a^2 * ( qR - qL );
     """
     a = 0.5 * ( eigenvalue(qL) + eigenvalue(qR) )
     return 0.5 * ( flux(qR) + flux(qL) ) - 0.5 * dt/dx * a*a * ( qR - qL )
 
-def forcesca(qL, qR, dx, dt): 
+def forcesca(qL, qR, dx, dt):
     """FORCE flux, pag 54, formula 4.13
-    
+
     function flu = forceSca(qL,qR,dx,dt)
         fLW = lwSca(qL,qR,dx,dt);
-        fLF = lfSca(qL,qR,dx,dt);        
-        flu = 0.5*(fLW+fLF);    
+        fLF = lfSca(qL,qR,dx,dt);
+        flu = 0.5*(fLW+fLF);
     """
     fLW = lwsca(qL, qR, dx, dt)
     fLF = lfsca(qL, qR, dx, dt)
     return 0.5 * ( fLW + fLF )
 
-def roesca(qL, qR, dx, dt): 
+def roesca(qL, qR, dx, dt):
     """Roe flux, pag 63, formula 4.71
-    
+
     function flu = forceSca(qL,qR,dx,dt)
         % Only for burgers
         a = 0.5*(qR+qL);
@@ -175,13 +176,13 @@ def oshermodsca(qL, qR, dx, dt): # :
     function flu = oshermodSca(qL,qR,dx,dt)
         aL = eigenvalue(qL);
         aR = eigenvalue(qR);
-        flu = 0.5*(flux(qL)+flux(qR))-0.5*((abs(aL)+abs(aR))/2)*(qR-qL);    
+        flu = 0.5*(flux(qL)+flux(qR))-0.5*((abs(aL)+abs(aR))/2)*(qR-qL);
     """
     aL, aR = eigenvalue(qL), eigenvalue(qR);
     return 0.5 * ( flux(qL) + flux(qR) ) \
            - 0.5 * ( ( abs(aL) + abs(aR) ) * 0.5) * ( qR - qL )
-           
-#godSca, lfSca, lwSca, forceSca, roeSca, oshermodSca         
+
+#godSca, lfSca, lwSca, forceSca, roeSca, oshermodSca
 NUM_MTD = {
     'godSca'       : godsca,
     'lfSca'        : lfsca,
