@@ -93,32 +93,32 @@ def shock(xvect, x0, qL, qR):
     solution[np.nonzero(xvect > x0)] = qR
     return solution
 
-#
-#def rarefaction(xvect, xL, xR, qL, qR):
-#    xvect = toarray(xvect)
-#    solution = np.empty(xvect.shape)
-#    solution[np.nonzero(xvect < xL)] = qL
-#    solution[np.nonzero(xvect > xR)] = qR
-#    # find where: xL < xvect < xR
-#    rarefactionlist, = np.nonzero( (xvect > xL) * (xvect < xR) )
-#    return solution, rarefactionlist
-#
-#
-#def nlers2(qL, qR, xvect):
-#    aL = eigenvalue(qL)
-#    aR = eigenvalue(qR)
-#    xvect = toarray(xvect)
-#
-#    if(aL > aR):
-#        # is a Shock wave
-#        s = ( flux(qR) - flux(qL) ) / ( qR - qL )
-#        solution = shock(xvect, s, qL, qR)
-#    else:
-#        # is a Rarefaction
-#        solution, rarefactionlist = rarefaction(xvect, aL, aR, qL, qR)
-#        for rarefact in rarefactionlist:
-#            solution[rarefact] = newton( 0.5 * ( qL + qR ), xvect[rarefact] )
-#    return solution
+
+def rarefaction(xvect, xL, xR, qL, qR):
+    xvect = toarray(xvect)
+    solution = np.empty(xvect.shape)
+    solution[np.nonzero(xvect < xL)] = qL
+    solution[np.nonzero(xvect > xR)] = qR
+    # find where: xL < xvect < xR
+    rarefactionlist, = np.nonzero( (xvect > xL) * (xvect < xR) )
+    return solution, rarefactionlist
+
+
+def nlers2(qL, qR, xvect):
+    aL = eigenvalue(qL)
+    aR = eigenvalue(qR)
+    xvect = toarray(xvect)
+
+    if(aL > aR):
+        # is a Shock wave
+        s = ( flux(qR) - flux(qL) ) / ( qR - qL )
+        solution = shock(xvect, s, qL, qR)
+    else:
+        # is a Rarefaction
+        solution, rarefactionlist = rarefaction(xvect, aL, aR, qL, qR)
+        for rarefact in rarefactionlist:
+            solution[rarefact] = newton( 0.5 * ( qL + qR ), xvect[rarefact] )
+    return solution
 
 
 def godsca(qL, qR, dx, dt):

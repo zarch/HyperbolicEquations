@@ -95,9 +95,9 @@ def get_sol_interface(sol, dx, dt):
     # set values at the boundaries
     sol_p[-1] = sol[-1]
     sol_m[ 0] = sol[ 0]
-    print('slope: {}'.format(prettyp(slope[:10])))
-    print('sol_p: {}'.format(prettyp(sol_p[:10])))
-    print('sol_m: {}'.format(prettyp(sol_m[:10])))
+#    print('slope: {}'.format(prettyp(slope[:10])))
+#    print('sol_p: {}'.format(prettyp(sol_p[:10])))
+#    print('sol_m: {}'.format(prettyp(sol_m[:10])))
     return sol_p, sol_m
 
 
@@ -270,7 +270,7 @@ def plot_fv1D(xL, xR, x0, iMAX, qL, qR, tSTART, tEND, courant,
     qL_limit, qR_limit = get_q_limit(qL, qR, ylimext)
     #import pdb; pdb.set_trace()
     #print xvect_b
-    print prettyp(solution[:10])
+    #print prettyp(solution[:10])
     line1, = ax.plot(xvect_b, solution, 'o')
     #plt.ylim( ( qL_limit, qR_limit ) )
     for time, solution in ORDER[order](solution, dx, qL, qR, tSTART, tEND,
@@ -279,12 +279,12 @@ def plot_fv1D(xL, xR, x0, iMAX, qL, qR, tSTART, tEND, courant,
         plt.pause(pause)
         ax.clear()
         #print xvect_b
-        print prettyp(solution[:10])
+        #print prettyp(solution[:10])
         plt.title('Current time t = {:6.5f}'.format(time))
         line1, = ax.plot(xvect_b, solution, 'o')
         xi = ( xvect - x0 ) / time
         line2, = ax.plot(xvect_b, [flx.nlers(qL, qR, xq) for xq in xi], 'r-')
-        #line2, = ax.plot(xvect_b, flx.nlers2(qL, qR, x1), 'r-')
+        #line2, = ax.plot(xvect_b, flx.nlers2(qL, qR, xi), 'r-')
         #plt.ylim( ( qL_limit, qR_limit ) )
 
 
