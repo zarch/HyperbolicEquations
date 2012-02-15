@@ -158,6 +158,16 @@ class Solver1D(object):
         self.pause = 0.01
         dt = self.courant * self.dx / np.max( np.abs(self.advec) )
         self.dt = dt
+        xexact = np.linspace(xL, xR, iMAX*5)
+        self.xexact = xexact
+        self.exact = np.zeros((len(self.xexact), ))
+        self.exact_sol = []
+        self.DTYPEEXACT = np.dtype([
+                    ('time', np.float64),
+                    ('sol',  np.float64, (len(self.xexact),))
+                    ])
+        self.last = None
+        self.boundary = (np.array([ 0, -1]),)
 
     def __str__(self):
         return SOLVER.format(xL = self.xL, xR = self.xR,
@@ -354,6 +364,285 @@ class Solver1D(object):
 
 ############################################################################
 
+class Burgers(Solver1D):
+    def __init__(self, advection_speed = 1, x0 = -3, xL = -5, xR = 5,
+        tSTART = 0, tEND = 0.2, iMAX = 200, nMAX = 10000, courant_numb=0.5,
+        qL = 1, qR = 3, pause = 0.01):
+        Solver1D.__init__(self, advection_speed = advection_speed,
+                 x0 = x0, xL = xL, xR = xR,
+                 tSTART = tSTART, tEND = tEND,
+                 iMAX = iMAX, nMAX = nMAX, courant_numb=courant_numb,
+                 qL = qL, qR = qR)
+        self.mthds = {'Lax Wendrof'   : self.lw,
+                      'Lax Friedrich' : self.lf,
+                      'force'         : self.force,
+                      'Godunov'       : self.godunov,
+                      'Roe'           : self.roe,
+                      'Osher'         : self.osher}
+        self.pause = pause
+
+    def get_dt(self, solution):
+        maxflux = np.max( np.abs( self.eigenvalue(solution) ) )
+        return self.courant * self.dx / maxflux
+
+    def flux(self, q):
+        """
+        function y = flux(q)
+            y = 0.5*q.^2;   % componentwise application
+            %y = q^4/4;
+        """
+        return 0.5*q*q #q*q*q*q/4. # Example 21/23, pag. 31/32
+
+
+    def eigenvalue(self, q):
+        """
+        function y = eigenvalue(q)
+            y = q;
+            %y = q.^3;
+        """
+        return q #q*q*q # Example 21/23, pag. 31/32
+
+    def shock(self, x0, qL, qR, xvect=None):
+        """
+        >>> shock(range(10), 4, 2, 8)
+        [[ 2.  2.  2.  2.  2.  8.  8.  8.  8.  8.]]
+        """
+        if xvect==None: xvect = self.xvect
+        solution = np.empty(xvect.shape)
+        solution[np.nonzero(xvect <= x0)] = qL
+        solution[np.nonzero(xvect > x0)] = qR
+        return solution
+
+    def nlers(self, qL, qR, xi):
+        """
+        function q = NLERS(qL,qR,xi)
+            aL = eigenvalue(qL);
+            aR = eigenvalue(qR);
+            eta=0.001;
+            if(aL > aR)
+                % Shock wave
+                s = (flux(qR)-flux(qL))/(qR-qL);
+                if(xi<=s)
+                    q = qL;
+                else
+                    q = qR;
+                end
+            else
+                % Rarefaction
+                if(xi<aL)
+                    q = qL;
+                elseif(xi>aR)
+                    q = qR;
+                else
+                    q=0.5*(qL+qR);
+                    q = Newton(q,xi);
+                end
+            end
+        """
+        aL = self.eigenvalue(qL);
+        aR = self.eigenvalue(qR);
+        if aL > aR:
+            # is a Shock wave
+            s = ( self.flux(qR) - self.flux(qL) ) / ( qR - qL );
+            if (xi <= s):
+                q = qL;
+            else:
+                q = qR;
+        else:
+            # is a Rarefaction
+            if xi < aL:
+                q = qL
+            elif xi > aR:
+                q = qR
+            else:
+                #print( 'is a Rarefaction')
+                #import pdb; pdb.set_trace()
+                q = 0.5 * (qL + qR)
+                q = self.newton(q, xi)
+        return q
+
+    def g(self, q, xi):
+        """
+        function y = g(q,xi)
+            y = eigenvalue(q)-xi;
+        """
+        return self.eigenvalue(q)-xi
+
+
+    def dg(self, q, xi, eta=1e-7):
+        """
+        function y = dg(q,xi)
+            eta=1e-7;
+            y = (g(q+eta,xi)-g(q-eta,xi))/(2*eta);
+        """
+        return ( self.g(q + eta, xi) - self.g(q - eta, xi) ) / ( 2 * eta )
+
+
+    def newton(self, q0, xi, tol = 1e-12, iMAX = 100):
+        """
+        function q=Newton(q0,xi)
+            tol=1e-12;
+            q=q0;
+            for i=1:100
+                if(abs(g(q,xi))<tol)
+                    break
+                end
+                dq = g(q,xi)/dg(q,xi);
+                q=q-dq;
+            end
+        """
+        if isinstance(xi, np.ndarray):
+            print('Error: "xi" must be a number')
+            raise
+        q = q0
+        for i in range(iMAX):
+            if(abs( self.g(q, xi) ) < tol):
+                break
+            dq = self.g(q, xi) / self.dg(q, xi)
+            q = q-dq
+        #if i == iMAX and abs( g(q, xi) ) < tol: print('Not converged using Newton')
+        #print('Newton number of iteration to converge: {0:d}'.format(i))
+        return q
+
+    def lf(self, qL, qR, dx, dt):
+        return 0.5 * (self.flux(qL) + self.flux(qR)) - 0.5 * dx/dt * (qR - qL)
+
+    def lw(self, qL, qR, dx, dt):
+        """Lax-Wendrof flux, pag 54, formula 4.9
+
+        function flu = lwSca(qL,qR,dx,dt)
+            a = 0.5 * ( eigenvalue(qL) + eigenvalue(qR) );
+            flu = 1/2 * ( flux(qR)+flux(qL) ) - 1/2 * dt/dx * a^2 * ( qR - qL );
+        """
+        #import pdb; pdb.set_trace()
+        a = 0.5 * ( self.eigenvalue(qL) + self.eigenvalue(qR) )
+        return   0.5 * ( self.flux(qR) + self.flux(qL) ) \
+               - 0.5 * dt/dx * a*a * ( qR - qL )
+
+    def force(self, qL, qR, dx, dt):
+        """FORCE flux, pag 54, formula 4.13
+
+        function flu = forceSca(qL,qR,dx,dt)
+            fLW = lwSca(qL,qR,dx,dt);
+            fLF = lfSca(qL,qR,dx,dt);
+            flu = 0.5*(fLW+fLF);
+        """
+        fLW = self.lw(qL, qR, dx, dt)
+        fLF = self.lf(qL, qR, dx, dt)
+        return 0.5 * ( fLW + fLF )
+
+    def godunov(self, qL, qR, dx, dt):
+        """Godunov flux, pag 55, formula 4.14
+
+        function flu = godSca(qL,qR)
+            flu = flux(NLERS(qL,qR,0));
+        """
+        return self.flux( self.nlers(qL, qR, 0) )
+
+    def roe(self, qL, qR, dx, dt):
+        """Roe flux, pag 63, formula 4.71
+
+        function flu = forceSca(qL,qR,dx,dt)
+            % Only for burgers
+            a = 0.5*(qR+qL);
+            flu = 0.5*(flux(qL)+flux(qR))-0.5*abs(a)*(qR-qL);
+        """
+        a = 0.5 * ( qR + qL )
+        return   0.5 * ( self.flux(qL) + self.flux(qR) ) \
+               - 0.5 * abs(a) * ( qR - qL )
+
+    def osher(self, qL, qR, dx, dt): # :
+        """Osher flux, pag 65, formula 4.83
+
+        function flu = oshermodSca(qL,qR,dx,dt)
+            aL = eigenvalue(qL);
+            aR = eigenvalue(qR);
+            flu = 0.5*(flux(qL)+flux(qR))-0.5*((abs(aL)+abs(aR))/2)*(qR-qL);
+        """
+        aL, aR = self.eigenvalue(qL), self.eigenvalue(qR);
+        return   0.5 * ( self.flux(qL) + self.flux(qR) ) \
+               - 0.5 * ( ( abs(aL) + abs(aR) ) * 0.5) * ( qR - qL )
+
+
+    def get_solution(self, itime, dt, funct):
+        q0 = self.dat[itime]['sol']
+        q1 = self.dat[itime+1]['sol']
+        #import pdb; pdb.set_trace()
+        for i in range(1, len(q0)-1):
+            #if q0[i-1] != q0[i+1]: import pdb; pdb.set_trace()
+            fluxL = self.mthds[funct](q0[i-1], q0[i], self.dx, dt)
+            fluxR = self.mthds[funct](q0[i], q0[i+1], self.dx, dt)
+            q1[i] =  q0[i] - dt/self.dx * (fluxR - fluxL)
+            # set boundary condition
+        q1[self.boundary] = q0[self.boundary]
+        return q1
+
+    def compute_numerical(self, funct):
+        # set intial condition
+        print("Start compute using: {mth}".format(mth=funct))
+        self.used = funct
+        start = datetime.datetime.now()
+        self.dat[0] = self.tSTART, self.shock(self.x0, self.qL, self.qR)
+        for itime in range(0, self.nMAX):
+            time = self.dat['time'][itime]
+            dt = self.get_dt(self.dat['sol'][itime])
+            if  time + dt > self.tEND: dt = self.tEND - time
+            self.dat[itime+1] = time + dt, self.get_solution(itime, dt, funct)
+            #print self.dat[itime+1]
+            if time + dt >= self.tEND: break
+        end = datetime.datetime.now()
+        print("Time necessary to compute: {0}".format(end - start))
+            #TODO: add the flush bar time+dt/self.tEND*100
+
+#    def burgers1Dexact(xvect, tvect, x0, qL, qR, iMAX):
+#        for ti in tvect:
+#    #        yield flx.nlers2(qL, qR, (xvect-x0)/ti)
+#            xi = (xvect - x0) / ti
+#            solution = []
+#            for i in range(iMAX):
+#                solution.append(self.nlers(qL,qR,xi[i]))
+#            yield solution
+
+    def compute_exact(self):
+        self.last = np.nonzero(self.dat['time'])[0][-1]+1
+        #import pdb; pdb.set_trace()
+        self.exact_sol = np.zeros((self.last,), dtype=self.DTYPEEXACT )
+        print("Start compute exact solution")
+        start = datetime.datetime.now()
+        for itime, time in enumerate(self.dat['time'][:self.last]):
+            if itime == 0:
+                self.exact_sol[itime] = time, self.shock(self.x0,
+                                                         self.qL, self.qR,
+                                                         self.xexact)
+            else:
+                for i, xt in enumerate((self.xexact - self.x0)/time):
+                    #import pdb; pdb.set_trace()
+                    self.exact[i] = self.nlers(self.qL, self.qR, xt)
+                #print(itime)
+                self.exact_sol[itime] = time, self.exact
+        end = datetime.datetime.now()
+        print("Time necessary to compute: {0}".format(end - start))
+
+    def show(self):
+        fig = plt.figure()
+        ax1 = fig.add_subplot(1,1,1)
+        first = True
+        for (time_d, sol_d), (time_e, sol_e) in zip(self.dat, self.exact_sol):
+            if time_d!=0 or first:
+                first = False
+                plt.pause(self.pause)
+                ax1.clear()
+                plt.title('{m} - Current time t = {t:6.5f}'.format(m=self.used,
+                                                                   t=time_d))
+                line1e, = ax1.plot(self.xexact, sol_e, 'r-')
+                line1d, = ax1.plot(self.xvect,  sol_d, 'o')
+                #TODO: add a process to compute the exact
+            else:
+                break
+        plt.show()
+
+############################################################################
+
 
 
 
@@ -400,7 +689,8 @@ class Solver1Dsys(object):
                       'Lax Friedrich' : self.lf,
                       'Warming Beam'  : self.wb,
                       'Fromm'         : self.fromm,
-                      'Weno'          : self.weno,}
+                      'WENO'          : self.weno,}
+                      #'DGRK'          : self.dgrk}
         self.used = None
         self.solution = []
         self.DTYPESOL = np.dtype([
@@ -423,7 +713,9 @@ class Solver1Dsys(object):
                     ('sol',  np.float64, (len(self.xexact), len(self.qL)))
                     ])
         self.last = None
-        #import pdb; pdb.set_trace()
+
+        #=============== used only for DGRK
+
 
 
     def __str__(self):
@@ -861,6 +1153,267 @@ class Solver1Dsys(object):
 
 
 
+
+
+
+class DGRK(Solver1Dsys):
+    def __init__(self, advection_speed = np.array([[0., 2.], [ 1., 0.]]),
+                 R = np.array([[-np.sqrt(2), np.sqrt(2)],[1., 1.]]),
+                 D = np.array([[-np.sqrt(2), 0],[0., np.sqrt(2)]]),
+                 x0 = 0, xL = -1, xR = 1,
+                 tSTART = 0, tEND = 0.2,
+                 iMAX = 200, nMAX = 10000, courant_numb=0.5,
+                 qL = np.array([2., 1.]), qR = np.array([1., 0.]),
+                 accuracy=2,
+                 M=[(1, 0, 0),( 0, 1./3., 0),(0, 0, 1./5.)],
+                 K=[(0, 0, 0),(2, 0, 0),(0, 2, 0)] ):
+        #super(Solver1D, self).__init__() #return AttributeError: 'DGRK' object has no attribute 'dx'
+        Solver1Dsys.__init__(self, advection_speed = advection_speed,
+                 R = R, D = D, x0 = x0, xL = xL, xR = xR,
+                 tSTART = tSTART, tEND = tEND,
+                 iMAX = iMAX, nMAX = nMAX, courant_numb=courant_numb,
+                 qL = qL, qR = qR)
+        # add the new methods
+        self.mthds['DGRK'] = self.dgrk
+        self.mthds['DGRK2'] = self.dgrk2
+        self.nVar,self.temp = self.A.shape
+        #return TypeError: object.__init__() takes no parameters
+        self.accuracy = int(accuracy)         # polynomial degree of the test and basis functions
+        self.nDOFs = self.accuracy+1;    # number of spatial degrees of freedom
+        self.nDOF  = (self.accuracy+1)^2 # number of space-time degrees of freedom
+        self.courant = 1./(2.*self.accuracy+1.);  # Courant number
+        dt = self.courant * self.dx / np.max( np.abs(self.lambd) )
+        self.dt = dt
+        M = self.dx * np.array(M, dtype = np.float64)
+        self.M = M
+        iM = np.linalg.inv(self.M)
+        self.iM = iM
+        # Define mass matrix for int(diff(phi_k,x)*phi_l)
+        self.K = np.array(K, dtype = np.float64)
+        qhat0 = np.zeros((self.nVar, self.nDOFs, self.iMAX))
+        self.qhat0 = qhat0
+        self.qhat0[:,0,:] = self.shock(self.x0).T
+        self.qhat0[:,1:2,:] = 0
+        qhat1 = np.zeros((self.nVar,self.nDOFs,self.iMAX))
+        self.qhat1 = qhat1
+        Lh0 = np.zeros((self.nVar,self.nDOFs,self.iMAX))
+        self.Lh0 = Lh0
+        Lh1 = np.zeros((self.nVar,self.nDOFs,self.iMAX))
+        self.Lh1 = Lh1
+        phiL = self.phis(0)
+        phiR = self.phis(1)
+        self.phiL = phiL
+        self.phiR = phiR
+        FL, FR = np.empty(self.qhat0.shape), np.empty(self.qhat0.shape)
+        self.FL = FL
+        self.FR = FR
+
+    def phis(self, xi):
+        """
+        function y=phis(xi)
+            y(1) = 1;
+            y(2) = 2*xi-1;
+            y(3) = 1-6*xi+6*xi^2;"""
+        return np.array([1.,
+                         2. * xi - 1.,
+                         1. - 6. * xi + 6. * xi**2.])
+
+
+    def get_qlqr(self, phiL, phiR, qhat):
+        """
+        for i=1:IMAX
+            % Compute left and right boundary cell values
+            phiL = phis(0);
+            phiR = phis(1);
+            for j=1:2
+                ql(j,i) = phiL(1)*qhat(j,1,i)+phiL(2)*qhat(j,2,i)+phiL(3)*qhat(j,3,i);
+                qr(j,i) = phiR(1)*qhat(j,1,i)+phiR(2)*qhat(j,2,i)+phiR(3)*qhat(j,3,i);
+            end
+        end
+        """
+        ql, qr = np.empty((self.iMAX, 2)), np.empty((self.iMAX, 2))
+        # non si può calcolare direttamente?
+        for i in range(self.iMAX):
+            # Compute left and right boundary cell values
+            for j in (0,1):
+                #TODO: use numpy casting
+                # compute left
+                ql[i,j] =  phiL[0] * qhat[j,0,i]\
+                          +phiL[1] * qhat[j,1,i]\
+                          +phiL[2] * qhat[j,2,i]
+                # compute right
+                qr[i,j] =  phiR[0] * qhat[j,0,i]\
+                          +phiR[1] * qhat[j,1,i]\
+                          +phiR[2] * qhat[j,2,i]
+            #import pdb; pdb.set_trace()
+        return ql, qr
+
+    def get_qlqr2(self, phiL, phiR, qhat):
+        """
+        for i=1:IMAX
+            % Compute left and right boundary cell values
+            phiL = phis(0);
+            phiR = phis(1);
+            for j=1:2
+                ql(j,i) = phiL(1)*qhat(j,1,i)+phiL(2)*qhat(j,2,i)+phiL(3)*qhat(j,3,i);
+                qr(j,i) = phiR(1)*qhat(j,1,i)+phiR(2)*qhat(j,2,i)+phiR(3)*qhat(j,3,i);
+            end
+        end
+        """
+        #import pdb; pdb.set_trace()
+        muL = qhat*np.array((phiL[:, np.newaxis],phiL[:,np.newaxis]))
+        muR = qhat*np.array((phiR[:, np.newaxis],phiR[:,np.newaxis]))
+        return np.sum(muL, axis=1).T, np.sum(muR, axis=1).T
+
+    def get_FLFR(self, phiL, phiR, ql, qr):
+        """
+        for i=1:IMAX
+            phiL = phis(0);
+            phiR = phis(1);
+            % Left and right values for base functions
+            if(i==1)
+                fluL = A*ql(:,i);
+                fluR = A*ERS(qr(:,i),ql(:,i+1),A,0);
+            elseif(i==IMAX)
+                fluR = A*qr(:,i-1);
+                fluL = A*ERS(qr(:,i-1),ql(:,i),A,0);
+            else
+                fluR = A*ERS(qr(:,i),ql(:,i+1),A,0);
+                fluL = A*ERS(qr(:,i-1),ql(:,i),A,0);
+            end
+            for j=1:3
+                FR(:,j,i) = phiR(j)*fluR;
+                FM(:,j,i) = phiL(j)*fluL;
+            end
+        end
+        """
+        FL, FR = np.empty(self.qhat0.shape), np.empty(self.qhat0.shape)
+        for i in range(self.iMAX):
+            # Left and right values for base functions
+            if i==0: # the first
+                fluL = np.dot(self.A, ql[i, :])
+                fluR = np.dot(self.A, self.ers(qr[i  ,:], ql[i+1,:], self.A, 0))
+            elif i==self.iMAX-1: # the last
+                fluL = np.dot(self.A, self.ers(qr[i-1,:], ql[i  ,:], self.A, 0))
+                fluR = np.dot(self.A, qr[i-1, :])
+            else:
+                fluL = np.dot(self.A, self.ers(qr[i-1,:], ql[i  ,:], self.A, 0))
+                fluR = np.dot(self.A, self.ers(qr[i  ,:], ql[i+1,:], self.A, 0))
+
+            for j in (0,1,2): #TODO: use numpy vectors:
+
+                FL[:, j, i] = phiL[j]*fluL
+                FR[:, j, i] = phiR[j]*fluR
+            #import pdb; pdb.set_trace()
+            #phiL * fluL[:,np.newaxis]
+        return FL, FR
+
+    def get_FLFR2(self, phiL, phiR, ql, qr):
+        # i==0
+        fluL = np.dot(self.A, ql[0, :])
+        fluR = np.dot(self.A, self.ers(qr[0  ,:], ql[1,:], self.A, 0))
+        self.FL[:, :, 0] = phiL*fluL[:,np.newaxis]
+        self.FR[:, :, 0] = phiR*fluR[:,np.newaxis]
+        for i in range(1,self.iMAX-1):
+            fluL = np.dot(self.A, self.ers(qr[i-1,:], ql[i  ,:], self.A, 0))
+            fluR = np.dot(self.A, self.ers(qr[i  ,:], ql[i+1,:], self.A, 0))
+            self.FL[:, :, i] = phiL*fluL[:,np.newaxis]
+            self.FR[:, :, i] = phiR*fluR[:,np.newaxis]
+        # i==-1
+        fluL = np.dot(self.A, self.ers(qr[-2,:], ql[-1  ,:], self.A, 0))
+        fluR = np.dot(self.A, qr[-2, :])
+        self.FL[:, :, -1] = phiL*fluL[:,np.newaxis]
+        self.FR[:, :, -1] = phiR*fluR[:,np.newaxis]
+        return self.FL, self.FR
+
+
+    def lhgen(self, qhat):
+        """"
+        function Lh = Lhgen(IMAX,qhat,iM,K,A)
+        [=> get_qlqr]
+        [=> get_FLFR]
+        %
+        for i=1:IMAX
+            for p=1:3
+                 flus(:,p) = A*qhat(:,p,i);
+            end
+            for j=1:2
+                Lh(j,:,i) = iM*((K*flus(j,:)')'-FR(j,:,i)+FM(j,:,i))';
+            end
+        end
+        """
+        ql, qr = self.get_qlqr(self.phiL, self.phiR, qhat)
+        FL, FR = self.get_FLFR(self.phiL, self.phiR, ql, qr)
+        flus = np.empty((2,3))
+        Lh = np.empty(qhat.shape)
+        for i in range(self.iMAX):
+            for p in (0, 1, 2):
+                flus[:,p] = np.dot(self.A, qhat[:,p,i])
+            for j in (0, 1):
+                Lh[j, :, i] = np.dot(self.iM,
+                                    (np.dot(self.K, flus[j,:].T)\
+                                    - FR[j,:,i] + FL[j, :, i]).T)
+        return Lh
+
+    def lhgen2(self, qhat):
+        """"
+        function Lh = Lhgen(IMAX,qhat,iM,K,A)
+        [=> get_qlqr]
+        [=> get_FLFR]
+        %
+        for i=1:IMAX
+            for p=1:3
+                 flus(:,p) = A*qhat(:,p,i);
+            end
+            for j=1:2
+                Lh(j,:,i) = iM*((K*flus(j,:)')'-FR(j,:,i)+FM(j,:,i))';
+            end
+        end
+        """
+        ql, qr = self.get_qlqr2(self.phiL, self.phiR, qhat)
+        #import pdb; pdb.set_trace()
+        FL, FR = self.get_FLFR2(self.phiL, self.phiR, ql, qr)
+        flus = np.empty((2,3))
+        Lh = np.empty(qhat.shape)
+        for i in range(self.iMAX):
+            for p in (0, 1, 2):
+                flus[:,p] = np.dot(self.A, qhat[:,p,i])
+            for j in (0, 1):
+                Lh[j, :, i] = np.dot(self.iM,
+                                    (np.dot(self.K, flus[j,:].T)\
+                                    - FR[j,:,i] + FL[j, :, i]).T)
+        return Lh
+
+
+    def dgrk(self, itime, dt):
+        # TVD Runge-Kutta (Jiang and Shu)
+        Lh0 = self.lhgen(self.qhat0)
+        #import pdb; pdb.set_trace()
+        qhat1 = self.qhat0 + self.dt*Lh0
+        Lh1 = self.lhgen(qhat1)
+        qhat2 = 3./4. * self.qhat0 + 1./4. * qhat1 + 1./4. * self.dt*Lh1
+        Lh2 = self.lhgen(qhat2)
+        self.qhat0 = 1./3. * self.qhat0 + 2./3. * qhat2 + 2./3. * self.dt*Lh2;
+        return np.array([self.qhat0[0,0,:], self.qhat0[1,0,:]]).T
+
+    def dgrk2(self, itime, dt):
+        # TVD Runge-Kutta (Jiang and Shu)
+        Lh0 = self.lhgen2(self.qhat0)
+        #import pdb; pdb.set_trace()
+        qhat1 = self.qhat0 + self.dt*Lh0
+        Lh1 = self.lhgen2(qhat1)
+        qhat2 = 3./4. * self.qhat0 + 1./4. * qhat1 + 1./4. * self.dt*Lh1
+        Lh2 = self.lhgen2(qhat2)
+        self.qhat0 = 1./3. * self.qhat0 + 2./3. * qhat2 + 2./3. * self.dt*Lh2;
+        return np.array([self.qhat0[0,0,:], self.qhat0[1,0,:]]).T
+
+
+
+
+
+
+
+
 #
 # TEST
 #
@@ -885,9 +1438,9 @@ R1 = [[-np.sqrt(2), np.sqrt(2)], [1, 1]]
 D1 = [[-np.sqrt(2),0], [0, np.sqrt(2)]]
 
 # Solver1Dsys
-problem = Solver1Dsys(iMAX=200, courant_numb=0.9)
-problem.compute_numerical('Lax Wendrof')
-problem.show2()
+#problem = Solver1Dsys(iMAX=200, courant_numb=0.9)
+#problem.compute_numerical('Lax Wendrof')
+#problem.show2()
 #problem = Solver1Dsys(advection_speed = [[0, 1],[ 2, 0]],
 #                      R = [[-np.sqrt(2), np.sqrt(2)], [1, 1]],
 #                      D = [[-np.sqrt(2),0], [0, np.sqrt(2)]],
@@ -904,6 +1457,20 @@ problem.show2()
 #problem.show2()
 #problem.compute_numerical('Fromm')
 #problem.show2()
-#problem.compute_numerical('Weno')
+#problem.compute_numerical('WENO')
+#problem.show2()
+#problem.compute_numerical('DGRK')
 #problem.show2()
 # RuntimeError: underlying C/C++ object has been deleted
+#dgrk = DGRK(iMAX = 20, accuracy = 2,
+#            M = [(1, 0, 0),( 0, 1./3., 0),(0, 0, 1./5.)],
+#            K = [(0, 0, 0),(2, 0, 0),(0, 2, 0)])
+#dgrk.compute_numerical('DGRK')
+#dgrk.show2()
+#dgrk = DGRK(iMAX = 20, accuracy = 2,
+#            M = [(1, 0, 0),( 0, 1./3., 0),(0, 0, 1./5.)],
+#            K = [(0, 0, 0),(2, 0, 0),(0, 2, 0)])
+#dgrk.compute_numerical('DGRK2')
+#dgrk.show2()
+#import pdb; pdb.set_trace()
+
