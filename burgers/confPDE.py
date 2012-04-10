@@ -16,12 +16,12 @@ xR = 5           # position of the right boundary
 
 # time domain
 tSTART = 0       # initial time
-tEND = 2.5         # final time
+tEND = 0.8         # final time
 
 x0 = -3
 
-iMAX = 100      # number of finite difference points in space
-tMAX = 100       # number of finite difference points in time
+iMAX = 200      # number of finite difference points in space
+tMAX = 200       # number of finite difference points in time
 
 maxiter = 10000  # number of max iteration
 
@@ -35,11 +35,11 @@ qR = 3.
 # Pause between each frame
 pause=0.0005
 # Numerical methods: godSca, lfSca, lwSca, forceSca, roeSca, oshermodSca
-nummtd = 'godSca'
+nummtd = 'lwSca'
 # Order of the methods: first, second
 order  = 'second'
 # find solution at the interface: simple, muscl
-solintmtd = 'muscl'         # (only for the second order method)
+solintmtd = 'simple'         # (only for the second order method)
 
 
 #===========================================================================

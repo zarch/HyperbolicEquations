@@ -167,18 +167,16 @@ def fv1D(solution, dx, qL, qR, tSTART, tEND, courant,
         next_solution = np.empty(solution.shape)
         # UPWIND method #FIXME: perché secondo Lucas questo metodo è upwind non lo posso sapere a priori, o si?
         for i in range(1, len(solution) - 1):
-#            fR = godSca(q(i),q(i+1));
-#            fL = godSca(q(i-1),q(i));
             fluxL = NUM_MTD[nummtd](solution[i-1], solution[i], dx, dt)
             fluxR = NUM_MTD[nummtd](solution[i], solution[i+1], dx, dt)
             next_solution[i] = solution[i] - dt/dx * (fluxR - fluxL)
-            #next_solution[i] = solution[i] + dt/dx * (fluxR - fluxL)
         # set the values for the boundary
         next_solution[0] = qL
         next_solution[-1] = qR
         solution = next_solution
         time += dt
         itertime += 1
+        print time, solution
         #go_on = False if itertime>maxiter else go_on
         yield time, solution
 

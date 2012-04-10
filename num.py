@@ -151,9 +151,9 @@ class Solver1D(object):
                       'Fromm'         : self.fromm,}
         self.used = None
         self.solution = []
-        DTYPESOL = np.dtype([('time', np.float64),
+        self.DTYPESOL = np.dtype([('time', np.float64),
                              ('sol',  np.float64, (self.iMAX,))])
-        self.dat = np.empty((self.nMAX,), dtype = DTYPESOL)
+        self.dat = np.zeros((self.nMAX,), dtype = self.DTYPESOL)
         self.ylimext = 0.15
         self.pause = 0.01
         dt = self.courant * self.dx / np.max( np.abs(self.advec) )
@@ -379,7 +379,13 @@ class Burgers(Solver1D):
                       'Godunov'       : self.godunov,
                       'Roe'           : self.roe,
                       'Osher'         : self.osher}
+        self.mthd_order = {'first'   : self.get_solution,
+                          'second'  : self.get_solution_2order}
+        self.SOLINT_MTD = {'simple' : self.get_sol_interface,
+                           'muscl'  : self.get_sol_interfaceMUSCL}
         self.pause = pause
+        self.boundary = (np.array([ 0, -1, -2, -3]),)
+
 
     def get_dt(self, solution):
         maxflux = np.max( np.abs( self.eigenvalue(solution) ) )
@@ -563,22 +569,117 @@ class Burgers(Solver1D):
         return   0.5 * ( self.flux(qL) + self.flux(qR) ) \
                - 0.5 * ( ( abs(aL) + abs(aR) ) * 0.5) * ( qR - qL )
 
+    def minmod(self, a,b):
+        """Minmod, formula. 4.104, pag. 67
 
-    def get_solution(self, itime, dt, funct):
+        function slope = minmod(a,b)
+            if(a*b<0)
+                slope=0;
+            elseif(abs(a)<=abs(b))
+                slope=a;
+            elseif(abs(a)>abs(b))
+                slope=b;
+            end
+        """
+        if a * b < 0:
+            slope = 0
+        elif abs(a) <= abs(b):
+            slope = a
+        elif abs(a) > abs(b):
+            slope = b
+        else:
+            print(a)
+            print(b)
+            print('no conditions are sadisfies: a*b<0, abs(a)<=abs(b), abs(a)>abs(b)')
+            raise
+        return slope
+
+    def get_sol_interfaceMUSCL(self, q0, dx, dt):
+        """
+        for i=2:IMAX-2
+            slope = minmod(q(i)-q(i-1),q(i+1)-q(i));
+            qp0 = q(i)-0.5*slope;
+            qm0 = q(i)+0.5*slope;
+            qp(i) = qp0 + 1/2 * dt/dx * ( flux(qp0) - flux(qm0) );
+            qm(i) = qm0 + 1/2 * dt/dx * ( flux(qp0) - flux(qm0) );
+        end
+        qm(1)=q(1);
+        qp(IMAX)=q(IMAX-1);
+        """
+        flx = self.flux
+        slope, q0_p, q0_m = np.empty(q0.shape), np.empty(q0.shape), np.empty(q0.shape)
+        for i in range(1, len(q0) - 1):
+            slope[i] = self.minmod(q0[i] - q0[i-1], q0[i+1] - q0[i])
+            sol0_p = q0[i] - 0.5 * slope[i]
+            sol0_m = q0[i] + 0.5 * slope[i]
+            q0_p[i] = sol0_p + 0.5*dt/self.dx * (flx(sol0_p) - flx(sol0_m))
+            q0_m[i] = sol0_m + 0.5*dt/self.dx * (flx(sol0_p) - flx(sol0_m))
+        # set values at the boundaries
+        q0_p[-1] = q0[-1]
+        q0_m[ 0] = q0[ 0]
+        return q0_p, q0_m
+
+
+    def get_sol_interface(self, q0, dx, dt):
+        """
+        for i=2:IMAX-2
+            slope = minmod(q(i)-q(i-1),q(i+1)-q(i));
+            qp(i) = q(i)-0.5*slope;
+            qm(i) = q(i)+0.5*slope;
+        end
+        qm(1)=q(1);
+        qp(IMAX)=q(IMAX-1)
+        """
+        dim_p = (len(q0),)
+        dim_m = (len(q0)-2,)
+        q0_p, q0_m = np.empty(dim_p), np.empty(dim_m)
+        for i in range(1, len(q0) - 2):
+            #if i==17: import pdb; pdb.set_trace()
+            slope = self.minmod(q0[i] - q0[i-1], q0[i+1] - q0[i])
+            q0_p[i] = q0[i] - 0.5 * slope
+            q0_m[i] = q0[i] + 0.5 * slope
+        # set values at the boundaries
+        q0_p[-1] = q0[-2]
+        q0_m[0] = q0[0]
+#        print 'q0_m: ', repr(q0_m)
+#        print 'q0_p: ', repr(q0_p)
+        #import pdb; pdb.set_trace()
+        return q0_p, q0_m
+
+
+    def get_solution(self, itime, dt, funct, type):
         q0 = self.dat[itime]['sol']
         q1 = self.dat[itime+1]['sol']
-        #import pdb; pdb.set_trace()
         for i in range(1, len(q0)-1):
-            #if q0[i-1] != q0[i+1]: import pdb; pdb.set_trace()
             fluxL = self.mthds[funct](q0[i-1], q0[i], self.dx, dt)
             fluxR = self.mthds[funct](q0[i], q0[i+1], self.dx, dt)
             q1[i] =  q0[i] - dt/self.dx * (fluxR - fluxL)
-            # set boundary condition
+        # set boundary condition
         q1[self.boundary] = q0[self.boundary]
         return q1
 
-    def compute_numerical(self, funct):
-        # set intial condition
+    def get_solution_2order(self, itime, dt, funct, type):
+        #print '='*30
+        #print itime, dt
+        q0 = self.dat[itime]['sol']
+        q1 = self.dat[itime+1]['sol']
+        q0_p, q0_m = self.SOLINT_MTD[type](q0, self.dx, dt)
+        #import pdb; pdb.set_trace()
+        for i in range(1, len(q0)-2):
+            fluxL = self.mthds[funct](q0_m[i-1], q0_p[i], self.dx, dt)
+            fluxR = self.mthds[funct](q0_m[i], q0_p[i+1], self.dx, dt)
+            #print fluxL, fluxR
+            q1[i] =  q0[i] - dt/self.dx * (fluxR - fluxL)
+        # set boundary condition
+        q1[self.boundary] = q0[self.boundary]
+        #print repr(q1)
+        #if itime==0: import pdb; pdb.set_trace()
+        return q1
+
+
+    def compute_numerical(self, funct, order='first', type = 'simple'):
+        # set intial solution
+        self.dat = np.zeros((self.nMAX,), dtype = self.DTYPESOL)
         print("Start compute using: {mth}".format(mth=funct))
         self.used = funct
         start = datetime.datetime.now()
@@ -586,8 +687,13 @@ class Burgers(Solver1D):
         for itime in range(0, self.nMAX):
             time = self.dat['time'][itime]
             dt = self.get_dt(self.dat['sol'][itime])
+#            print '='*30
+#            print itime+1, dt, self.dx, self.courant
+#            print repr(self.dat['sol'][itime])
+
+            #if itime==1: import pdb; pdb.set_trace()
             if  time + dt > self.tEND: dt = self.tEND - time
-            self.dat[itime+1] = time + dt, self.get_solution(itime, dt, funct)
+            self.dat[itime+1] = time + dt, self.mthd_order[order](itime, dt, funct, type)
             #print self.dat[itime+1]
             if time + dt >= self.tEND: break
         end = datetime.datetime.now()
@@ -1118,7 +1224,7 @@ class Solver1Dsys(object):
             # right side of cell
             qm[i,:] = q_right + dt/2. * dq_t_right + dt**2./6. * dq_tt_right
             # left side of cell
-            qp[i,:] = q_left + dt/2. * dq_t_left + dt**2./6. * dq_tt_left
+            qp[i,:] = q_left  + dt/2. * dq_t_left  + dt**2./6. * dq_tt_left
             #if i==10: import pdb; pdb.set_trace()
         boundary = (np.array([ 0,  1, 2, -1,-2,-3]),)
         qm[boundary,:] = q0[boundary,:]
@@ -1409,59 +1515,6 @@ class DGRK(Solver1Dsys):
 
 
 
-
-
-
-
-
-#
-# TEST
-#
-
-## Solver1D
-#problem = Solver1D(advection_speed = -1)
-#problem.compute('Lax Wendrof')
-#problem.show()
-#problem.compute('Lax Friedrich')
-#problem.show()
-#problem.compute('Warming Beam')
-#problem.show()
-#problem.compute('Fromm')
-#problem.show()
-
-A0 = [[0, 2],[ 1, 0]]
-R0 = [[-np.sqrt(2), np.sqrt(2)],[1., 1.]]
-D0 = [[-np.sqrt(2), 0],[0., np.sqrt(2)]]
-
-A1 = [[0, 1],[ 2, 0]]
-R1 = [[-np.sqrt(2), np.sqrt(2)], [1, 1]]
-D1 = [[-np.sqrt(2),0], [0, np.sqrt(2)]]
-
-# Solver1Dsys
-#problem = Solver1Dsys(iMAX=200, courant_numb=0.9)
-#problem.compute_numerical('Lax Wendrof')
-#problem.show2()
-#problem = Solver1Dsys(advection_speed = [[0, 1],[ 2, 0]],
-#                      R = [[-np.sqrt(2), np.sqrt(2)], [1, 1]],
-#                      D = [[-np.sqrt(2),0], [0, np.sqrt(2)]],
-#                      qL = [1,0], qR = [0,1],
-#                      iMAX=200, courant_numb=0.9)
-#problem.compute_numerical('Lax Friedrich')
-#problem.show2()
-#problem = Solver1Dsys(advection_speed = A0,
-#                      R = R0,
-#                      D = D0,
-#                      qL = [2,1], qR = [1,0],
-#                      iMAX=200, courant_numb=0.9)
-#problem.compute_numerical('Warming Beam')
-#problem.show2()
-#problem.compute_numerical('Fromm')
-#problem.show2()
-#problem.compute_numerical('WENO')
-#problem.show2()
-#problem.compute_numerical('DGRK')
-#problem.show2()
-# RuntimeError: underlying C/C++ object has been deleted
 #dgrk = DGRK(iMAX = 20, accuracy = 2,
 #            M = [(1, 0, 0),( 0, 1./3., 0),(0, 0, 1./5.)],
 #            K = [(0, 0, 0),(2, 0, 0),(0, 2, 0)])
